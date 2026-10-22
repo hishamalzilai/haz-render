@@ -3,8 +3,6 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import sharp from 'sharp';
@@ -13,10 +11,15 @@ import { renderMedia, renderStill, selectComposition } from '@remotion/renderer'
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { PostProps } from '../src/schema';
+import { assertPublicUrl } from './net';
+import { resolveMedia } from './resolve';
 
 const PORT = Number(process.env.PORT ?? 3005);
 const TOKEN = process.env.RENDER_TOKEN ?? '';
-const PUBLIC_BASE = (process.env.PUBLIC_BASE_URL ?? `http://127.0.0.1:${PORT}`).replace(/\/$/, '');
+const PUBLIC_BASE = (() => {
+  const raw = (process.env.PUBLIC_BASE_URL ?? `http://127.0.0.1:${PORT}`).trim().replace(/\/+$/, '');
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+})();
 const MAX_MEDIA_BYTES = Number(process.env.MAX_MEDIA_MB ?? 200) * 1024 * 1024;
 const RETENTION_HOURS = Number(process.env.RETENTION_HOURS ?? 24);
 const ROOT = path.resolve(__dirname, '..');
@@ -27,35 +30,6 @@ if (!TOKEN || TOKEN.length < 24) {
   console.error('RENDER_TOKEN must be set (>= 24 chars).');
   process.exit(1);
 }
-
-// ---------- SSRF guard: only public http(s) hosts ----------
-const isPrivateIp = (ip: string): boolean => {
-  if (isIP(ip) === 6) {
-    const v = ip.toLowerCase();
-    if (v === '::1' || v === '::') return true;
-    if (v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe80')) return true;
-    if (v.startsWith('::ffff:')) return isPrivateIp(v.slice(7));
-    return false;
-  }
-  const [a, b] = ip.split('.').map(Number);
-  return (
-    a === 10 || a === 127 || a === 0 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 100 && b >= 64 && b <= 127)
-  );
-};
-
-const assertPublicUrl = async (raw: string): Promise<URL> => {
-  const url = new URL(raw);
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only http(s) media URLs are allowed');
-  const addrs = await lookup(url.hostname, { all: true });
-  if (addrs.length === 0 || addrs.some((a) => isPrivateIp(a.address))) {
-    throw new Error('Media host resolves to a private address');
-  }
-  return url;
-};
 
 // ---------- media download (size + time limited) ----------
 const download = async (raw: string): Promise<{ file: string; contentType: string }> => {
@@ -173,6 +147,18 @@ const main = async () => {
   app.use('/out', express.static(OUT_DIR, { fallthrough: false }));
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
+
+  // Find the best image (and any demo video) for a project/page URL.
+  app.post('/resolve-media', auth, async (req, res) => {
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    if (!/^https?:\/\//i.test(url) || url.length > 2048) return res.status(400).json({ error: 'url required' });
+    try {
+      res.json(await resolveMedia(url));
+    } catch (e: any) {
+      console.error(e);
+      res.status(422).json({ error: e.message ?? 'resolve failed' });
+    }
+  });
 
   app.post('/render', auth, async (req, res) => {
     let input: RenderRequest;
