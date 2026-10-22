@@ -1,0 +1,33 @@
+{
+  "name": "haz-render",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HAZ post template renderer (Remotion) + render API for n8n",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "still": "remotion still src/index.ts Post out/test.png",
+    "video": "remotion render src/index.ts PostVideo out/test.mp4",
+    "server": "tsx server/render-server.ts",
+    "typecheck": "tsc --noEmit",
+    "versions": "remotion versions"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4",
+    "@remotion/cli": "^4",
+    "@remotion/google-fonts": "^4",
+    "@remotion/layout-utils": "^4",
+    "@remotion/renderer": "^4",
+    "express": "^4.21.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4",
+    "sharp": "^0.33.5",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "typescript": "^5.6.0"
+  }
+}
